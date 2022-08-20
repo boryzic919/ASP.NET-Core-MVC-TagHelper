@@ -4,11 +4,11 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
-using Microsoft.AspNet.Mvc;
-using Microsoft.AspNet.Mvc.Rendering;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Mvc.Rendering;
 using PagingDemo.Web.Models;
 using PagingDemo.Web.ViewModels;
-using cloudscribe.Web.Pagination;
+
 
 
 namespace PagingDemo.Web.Controllers
@@ -42,11 +42,24 @@ namespace PagingDemo.Web.Controllers
             }
         }
 
-
-        public IActionResult Index(int? page)
+       // [Route("paging/{page?}")]
+        public IActionResult Index(int p = 1)
         {
-            int currentPageIndex = page.HasValue ? page.Value - 1 : 0;
-            return View(this.allProducts.ToPagedList(currentPageIndex, DefaultPageSize));
+            
+            var currentPageNum = p;
+            var offset = (DefaultPageSize * currentPageNum) - DefaultPageSize;
+            var model = new ProductListViewModel();
+            model.Products.Data = this.allProducts
+                .Skip(offset)
+                .Take(DefaultPageSize)
+                .ToList();
+
+            model.Products.PageNumber = currentPageNum;
+            model.Products.PageSize = DefaultPageSize;
+            model.Products.TotalItems = allProducts.Count;
+
+            
+            return View(model);
 
             
         }
@@ -56,18 +69,56 @@ namespace PagingDemo.Web.Controllers
             int? pageSize,
             string query = "")
         {
-            int currentPageIndex = pageNumber.HasValue ? pageNumber.Value - 1 : 0;
-            int itemsPerPage = pageSize.HasValue ? pageSize.Value : DefaultPageSize;
-
+            var itemsPerPage = pageSize.HasValue ? pageSize.Value : DefaultPageSize;
+            var currentPageNum = pageNumber.HasValue ? pageNumber.Value  : 1;
+            var offset = (itemsPerPage * currentPageNum) - itemsPerPage;
             var model = new ProductListViewModel();
 
-            model.Products = this.allProducts.Where(p => 
-            p.Category.StartsWith(query)
-            ).ToPagedList(currentPageIndex, itemsPerPage);
+            var filtered = this.allProducts.Where(p =>
+                p.Category.StartsWith(query)
+                );
 
-            model.Paging.CurrentPage = pageNumber.HasValue ? pageNumber.Value : 1;
-            model.Paging.ItemsPerPage = itemsPerPage;
-            model.Paging.TotalItems = model.Products.TotalItemCount;
+            model.Products.Data = filtered
+                .Skip(offset)
+                .Take(itemsPerPage)
+                .ToList();
+
+            model.Products.PageNumber = currentPageNum;
+            model.Products.PageSize = itemsPerPage;
+            model.Products.TotalItems = filtered.ToList().Count;
+            model.Query = query; //TODO: sanitize
+
+            return View(model);
+
+
+        }
+
+        public IActionResult BlogPagingDemo(
+            int? pageNumber,
+            string query = "")
+        { 
+            int itemsPerPage = 1;
+
+            var currentPageNum = pageNumber.HasValue ? pageNumber.Value : 1;
+            var offset = (itemsPerPage * currentPageNum) - itemsPerPage;
+
+            var filtered = allProducts.Where(p =>
+                p.Category.StartsWith(query)
+            )
+            .OrderByDescending(p => p.CreatedUtc)
+            .ToList();
+            
+            var model = new ProductListViewModel();
+
+            model.Products.Data = filtered
+            .Skip(offset)
+            .Take(itemsPerPage)
+            .ToList();
+
+            model.Products.PageNumber = currentPageNum;
+            model.Products.PageSize = itemsPerPage;
+            model.Products.TotalItems = filtered.Count;
+            //model.Paging.UseReverseIncrement = true;
             model.Query = query; //TODO: sanitize
 
             return View(model);
@@ -77,14 +128,29 @@ namespace PagingDemo.Web.Controllers
 
         public IActionResult ViewByCategory(string categoryName, int? page)
         {
-            categoryName = categoryName ?? this.allCategories[0];
-            int currentPageIndex = page.HasValue ? page.Value - 1 : 0;
+            categoryName = categoryName ?? this.allCategories[0]; 
+            var currentPageNum = page.HasValue ? page.Value : 1;
+            var offset = (DefaultPageSize * currentPageNum) - DefaultPageSize;
 
-            var productsByCategory = this.allProducts.Where(p => p.Category.Equals(categoryName)).ToPagedList(currentPageIndex,
-                                                                                                              DefaultPageSize);
+            var filtered = this.allProducts.Where(p =>
+                p.Category.Equals(categoryName)
+                ).ToList();
+
+            var model = new ProductListViewModel();
+
+            model.Products.Data = filtered
+                .Skip(offset)
+                .Take(DefaultPageSize)
+                .ToList();
+
+            model.Products.PageNumber = currentPageNum;
+            model.Products.PageSize = DefaultPageSize;
+            model.Products.TotalItems = filtered.Count;
+
             ViewBag.CategoryName = new SelectList(this.allCategories, categoryName);
             ViewBag.CategoryDisplayName = categoryName;
-            return View("ProductsByCategory", productsByCategory);
+
+            return View("ProductsByCategory", model);
         }
 
         
@@ -102,38 +168,77 @@ namespace PagingDemo.Web.Controllers
                 }
             }
 
+            var currentPageNum = page.HasValue ? page.Value : 1;
+            var offset = (DefaultPageSize * currentPageNum) - DefaultPageSize;
+
             var model = new ViewByCategoriesViewModel();
             model.Categories = categories ?? new string[0];
             int currentPageIndex = page.HasValue ? page.Value - 1 : 0;
 
-            model.Products = this.allProducts.Where(p => model.Categories.Contains(p.Category)).ToPagedList(currentPageIndex, DefaultPageSize);
+            var filtered = this.allProducts.Where(p =>
+                model.Categories.Contains(p.Category)
+                ).ToList();
+
+            model.Products.Data = filtered
+                .Skip(offset)
+                .Take(DefaultPageSize)
+                .ToList();
+                
             model.AvailableCategories = this.allCategories;
 
-            model.Paging.CurrentPage = page.HasValue ? page.Value : 1;
-            model.Paging.ItemsPerPage = DefaultPageSize;
-            model.Paging.TotalItems = model.Products.TotalItemCount;
-            model.Paging.ShowFirstLast = true;
-
+            model.Products.PageNumber = currentPageNum;
+            model.Products.PageSize = DefaultPageSize;
+            model.Products.TotalItems = filtered.Count;
+           
             return View("ProductsByCategories", model);
         }
 
+        
         public IActionResult IndexAjax()
         {
-            int currentPageIndex = 0;
-            var products = this.allProducts.ToPagedList(currentPageIndex, DefaultPageSize);
-            if(HttpContext.Request.IsAjaxRequest())
+            
+            var model = new ProductListViewModel();
+
+            model.Products.Data = this.allProducts
+                .Take(DefaultPageSize)
+                .ToList();
+            
+
+            model.Products.PageNumber = 1;
+            model.Products.PageSize = DefaultPageSize;
+            model.Products.TotalItems = allProducts.Count;
+
+            if (HttpContext.Request.IsAjaxRequest())
             {
-                return PartialView("_PagingModal", products);
+               
+                return PartialView("_PagingModal", model);
             }
-            return View(products);
+            return View(model);
         }
 
-        public IActionResult AjaxPage(int? page)
+        //[Route("paging/ajaxpage/{page?}")]
+        public async Task<IActionResult> AjaxPage(int? page)
         {
             ViewBag.Title = "Browse all products";
-            int currentPageIndex = page.HasValue ? page.Value - 1 : 0;
-            var products = this.allProducts.ToPagedList(currentPageIndex, DefaultPageSize);
-            return PartialView("_ProductGrid", products);
+            
+            var currentPageNum = page.HasValue ? page.Value : 1;
+            var offset = (DefaultPageSize * currentPageNum) - DefaultPageSize;
+
+            var model = new ProductListViewModel();
+
+            model.Products.Data = this.allProducts
+                .Skip(offset)
+                .Take(DefaultPageSize)
+                .ToList();
+
+            model.Products.PageNumber = currentPageNum;
+            model.Products.PageSize = DefaultPageSize;
+            model.Products.TotalItems = allProducts.Count;
+
+            // simulate delay to show the loadinng indicator
+            await Task.Delay(2000);//milliseconds
+
+            return PartialView("_ProductGrid", model);
         }
 
 

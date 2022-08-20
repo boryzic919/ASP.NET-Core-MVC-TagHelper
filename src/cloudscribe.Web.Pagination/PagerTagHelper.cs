@@ -2,17 +2,18 @@
 // Licensed under the Apache License, Version 2.0. See License.txt in the project root for license information.
 // Author:					Joe Audette
 // Created:					2015-07-02
-// Last Modified:			2015-12-06
+// Last Modified:			2018-06-16
 // 
 
-using Microsoft.AspNet.Mvc.ViewFeatures;
-using Microsoft.AspNet.Mvc.Rendering;
-using Microsoft.AspNet.Razor.TagHelpers;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Mvc.Infrastructure;
+using Microsoft.AspNetCore.Mvc.Rendering;
+using Microsoft.AspNetCore.Mvc.Routing;
+using Microsoft.AspNetCore.Mvc.ViewFeatures;
+using Microsoft.AspNetCore.Razor.TagHelpers;
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Text;
-
 
 namespace cloudscribe.Web.Pagination
 {
@@ -27,6 +28,12 @@ namespace cloudscribe.Web.Pagination
         private const string MaxPagerItemsAttributeName = "cs-paging-maxpageritems";
         private const string AjaxTargetAttributeName = "cs-ajax-target";
         private const string AjaxModeAttributeName = "cs-ajax-mode";
+        private const string AjaxSuccessAttributeName = "cs-ajax-success";
+        private const string AjaxFailureAttributeName = "cs-ajax-failure";
+        private const string AjaxBeginAttributeName = "cs-ajax-begin";
+        private const string AjaxCompleteAttributeName = "cs-ajax-complete";
+        private const string AjaxLoadingAttributeName = "cs-ajax-loading";
+        private const string AjaxLoadingDurationAttributeName = "cs-ajax-loading-duration";
         private const string PageNumberParamAttributeName = "cs-pagenumber-param";
 
         private const string ActionAttributeName = "asp-action";
@@ -37,17 +44,29 @@ namespace cloudscribe.Web.Pagination
         private const string RouteAttributeName = "asp-route";
         private const string RouteValuesDictionaryName = "asp-all-route-data";
         private const string RouteValuesPrefix = "asp-route-";
+        private const string BaseHrefAttributeName = "asp-basehref";
 
-       
-        public PagerTagHelper(IHtmlGenerator generator, IBuildPaginationLinks linkBuilder)
+        public PagerTagHelper(
+            IUrlHelperFactory urlHelperFactory,
+            IActionContextAccessor actionContextAccesor,
+            //IHtmlGenerator generator, 
+            IBuildPaginationLinks linkBuilder = null)
         {
-            Generator = generator;
-            this.linkBuilder = linkBuilder;
+            //Generator = generator;
+            this.linkBuilder = linkBuilder ?? new PaginationLinkBuilder();
+            this.urlHelperFactory = urlHelperFactory;
+            this.actionContextAccesor = actionContextAccesor;
         }
+
+        private IUrlHelperFactory urlHelperFactory;
+        private IActionContextAccessor actionContextAccesor;
+
+        [ViewContext]
+        public ViewContext ViewContext { get; set; }
 
         private IBuildPaginationLinks linkBuilder;
 
-        protected IHtmlGenerator Generator { get; }
+        //protected IHtmlGenerator Generator { get; }
 
         [HtmlAttributeName(PagingInfoAttributeName)]
         public PaginationSettings PagingModel { get; set; } = null;
@@ -56,13 +75,13 @@ namespace cloudscribe.Web.Pagination
         public int PageSize { get; set; } = 10;
 
         [HtmlAttributeName(PageNumberAttributeName)]
-        public int PageNumber { get; set; } = 1;
+        public long PageNumber { get; set; } = 1;
 
         [HtmlAttributeName(TotalItemsAttributeName)]
-        public int TotalItems { get; set; } = 1;
+        public long TotalItems { get; set; } = 1;
 
         [HtmlAttributeName(MaxPagerItemsAttributeName)]
-        public int MaxPagerItems { get; set; } = 10;
+        public long MaxPagerItems { get; set; } = 10;
 
         [HtmlAttributeName(AjaxTargetAttributeName)]
         public string AjaxTarget { get; set; } = string.Empty;
@@ -70,12 +89,45 @@ namespace cloudscribe.Web.Pagination
         [HtmlAttributeName(AjaxModeAttributeName)]
         public string AjaxMode { get; set; } = "replace";
 
+        [HtmlAttributeName(AjaxSuccessAttributeName)]
+        public string AjaxSuccess { get; set; } = string.Empty;
+
+        [HtmlAttributeName(AjaxFailureAttributeName)]
+        public string AjaxFailure { get; set; } = string.Empty;
+
+        [HtmlAttributeName(AjaxBeginAttributeName)]
+        public string AjaxBegin { get; set; } = string.Empty;
+
+        [HtmlAttributeName(AjaxCompleteAttributeName)]
+        public string AjaxComplete { get; set; } = string.Empty;
+
+        [HtmlAttributeName(AjaxLoadingAttributeName)]
+        public string AjaxLoading { get; set; } = string.Empty;
+
+        [HtmlAttributeName(AjaxLoadingDurationAttributeName)]
+        public string AjaxLoadingDuration { get; set; } = string.Empty;
+
         [HtmlAttributeName(PageNumberParamAttributeName)]
         public string PageNumberParam { get; set; } = "pageNumber";
 
         [HtmlAttributeName("cs-show-first-last")]
         public bool ShowFirstLast { get; set; } = false;
 
+        [HtmlAttributeName("cs-show-numbered")]
+        public bool ShowNumbered { get; set; } = true;
+
+        [HtmlAttributeName("cs-use-reverse-increment")]
+        public bool UseReverseIncrement { get; set; } = false;
+
+        [HtmlAttributeName("cs-suppress-empty-nextprev")]
+        public bool SuppressEmptyNextPrev { get; set; } = false;
+
+        [HtmlAttributeName("cs-suppress-inactive-firstlast")]
+        public bool SuppressInActiveFirstLast { get; set; } = false;
+
+        [HtmlAttributeName("cs-suppress-empty-pager")]
+        public bool SuppressEmptyPager { get; set; } = true;
+        
         [HtmlAttributeName("cs-first-page-text")]
         public string FirstPageText { get; set; } = "<";
 
@@ -91,11 +143,17 @@ namespace cloudscribe.Web.Pagination
         [HtmlAttributeName("cs-previous-page-text")]
         public string PreviousPageText { get; set; } = "«";
 
+        [HtmlAttributeName("cs-previous-page-html")]
+        public string PreviousPageHtml { get; set; } = "";
+
         [HtmlAttributeName("cs-previous-page-title")]
         public string PreviousPageTitle { get; set; } = "Previous page";
 
         [HtmlAttributeName("cs-next-page-text")]
         public string NextPageText { get; set; } = "»";
+
+        [HtmlAttributeName("cs-next-page-html")]
+        public string NextPageHtml { get; set; } = "";
 
         [HtmlAttributeName("cs-next-page-title")]
         public string NextPageTitle { get; set; } = "Next page";
@@ -106,8 +164,17 @@ namespace cloudscribe.Web.Pagination
         [HtmlAttributeName("cs-pager-li-current-class")]
         public string LiCurrentCssClass { get; set; } = "active";
 
+        [HtmlAttributeName("cs-pager-li-other-class")]
+        public string LiOtherCssClass { get; set; } = "";
+
         [HtmlAttributeName("cs-pager-li-non-active-class")]
         public string LiNonActiveCssClass { get; set; } = "disabled";
+
+        [HtmlAttributeName("cs-pager-link-current-class")]
+        public string LinkCurrentCssClass { get; set; } = "";
+
+        [HtmlAttributeName("cs-pager-link-other-class")]
+        public string LinkOtherCssClass { get; set; } = "";
 
         /// <summary>
         /// The name of the action method.
@@ -159,8 +226,16 @@ namespace cloudscribe.Web.Pagination
         { get; set; }
         = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
+        /// <summary>
+        /// An alternative to Controller/Action or Route
+        /// </summary>
+        /// <remarks>
+        /// <see cref="Route"/> and <see cref="Action"/> and <see cref="Controller"/> must be null to be effective
+        /// </remarks>
+        [HtmlAttributeName(BaseHrefAttributeName)]
+        public string BaseHref { get; set; }
 
-        private string baseHref = string.Empty;
+        private IUrlHelper urlHelper = null;
         
         public override void Process(TagHelperContext context, TagHelperOutput output)
         {
@@ -173,10 +248,34 @@ namespace cloudscribe.Web.Pagination
                 PagingModel.ItemsPerPage = PageSize;
                 PagingModel.TotalItems = TotalItems;
                 PagingModel.MaxPagerItems = MaxPagerItems;
+                PagingModel.SuppressEmptyNextPrev = SuppressEmptyNextPrev;
+                PagingModel.SuppressInActiveFirstLast = SuppressInActiveFirstLast;
             }
+
+            if(ShowFirstLast)
+            {
+                PagingModel.ShowFirstLast = true;
+            }
+
+            if(!ShowNumbered)
+            {
+                PagingModel.ShowNumbered = false;
+            }
+
+            if(UseReverseIncrement)
+            {
+                PagingModel.UseReverseIncrement = true;
+
+                if(SuppressEmptyNextPrev)
+                {
+                    PagingModel.SuppressEmptyNextPrev = true;
+                }
+            }
+
+
             int totalPages = (int)Math.Ceiling(PagingModel.TotalItems / (double)PagingModel.ItemsPerPage);
             // don't render if only 1 page 
-            if (totalPages <= 1) 
+            if (SuppressEmptyPager && (totalPages <= 1))
             {
                 output.SuppressOutput();
                 return;
@@ -185,16 +284,13 @@ namespace cloudscribe.Web.Pagination
             //change the cs-pager element into a ul
             output.TagName = "ul";
             
-            string querySeparator;
-
+            
             //prepare things needed by generatpageeurl function
-            TagBuilder linkTemplate = GenerateLinkTemplate();
-            baseHref = linkTemplate.Attributes["href"] ?? string.Empty;
-            querySeparator = baseHref.Contains("?") ? "&" : "?";
-            baseHref = baseHref + querySeparator + PageNumberParam + "=";
 
+            urlHelper = urlHelperFactory.GetUrlHelper(actionContextAccesor.ActionContext);
+            
             List<PaginationLink> links = linkBuilder.BuildPaginationLinks(
-                PagingModel, 
+                PagingModel,
                 GeneratePageUrl,
                 FirstPageText,
                 FirstPageTitle,
@@ -214,56 +310,158 @@ namespace cloudscribe.Web.Pagination
                 {
                     li.AddCssClass(LiCurrentCssClass);
                 }
-
-                if (!link.Active)
-                {
-                    li.AddCssClass(LiNonActiveCssClass);
-                }
-
-                var a = new TagBuilder("a");
-
-                if(link.Url.Length > 0)
-                {
-                    a.MergeAttribute("href", link.Url);
-                }
                 else
                 {
-                    a.MergeAttribute("href", "#");
+                    if (!link.Active)
+                    {
+                        li.AddCssClass(LiNonActiveCssClass);
+                    }
+                    else
+                    {
+                        if(!string.IsNullOrWhiteSpace(LiOtherCssClass))
+                        {
+                            li.AddCssClass(LiOtherCssClass);
+                        }
+                    }
                 }
-                
 
-                if (link.Text == "«")
+                if(link.Text == PreviousPageText && !string.IsNullOrWhiteSpace(PreviousPageHtml))
                 {
-                    //a.InnerHtml = "&laquo;";
-                    a.InnerHtml.AppendHtml("&laquo;");
+                    if(string.IsNullOrEmpty(link.Url))
+                    {
+                        li.InnerHtml.AppendHtml(PreviousPageHtml);
+                    }
+                    else
+                    {
+                        li.InnerHtml.AppendHtml(PreviousPageHtml.Replace("#", link.Url));
+                    }
                     
                 }
-                else if (link.Text == "»")
+                else if(link.Text == NextPageText && !string.IsNullOrWhiteSpace(NextPageHtml))
                 {
-                    //a.InnerHtml = "&raquo;";
-                    a.InnerHtml.AppendHtml("&raquo;");
-
+                    if (string.IsNullOrEmpty(link.Url))
+                    {
+                        li.InnerHtml.AppendHtml(NextPageHtml);
+                    }
+                    else
+                    {
+                        li.InnerHtml.AppendHtml(NextPageHtml.Replace("#", link.Url));
+                    }
+                        
                 }
                 else
-                {
-                    a.InnerHtml.Append(link.Text);
-                }
+                {  
+                    if(!link.IsCurrent && link.Active)
+                    {
+                        var a = new TagBuilder("a");
 
-                if(link.Title.Length > 0)
-                {
-                    a.MergeAttribute("title", link.Title);
+                        if(!string.IsNullOrWhiteSpace(LinkOtherCssClass))
+                        {
+                            a.AddCssClass(LinkOtherCssClass);
+                        }
+
+                        if (link.Active && (link.Url.Length > 0))
+                        {
+                            a.MergeAttribute("href", link.Url);
+                        }
+                        else
+                        {
+                            a.MergeAttribute("href", "#");
+                        }
+
+
+                        if (link.Text == "«")
+                        {
+                            a.InnerHtml.AppendHtml("&laquo;");
+                        }
+                        else if (link.Text == "»")
+                        {
+                            a.InnerHtml.AppendHtml("&raquo;");
+                        }
+                        else if (link.Text.Contains('<') && link.Text.Contains('>')) 
+                        {
+                            //if text is an html formatted icon and contains a <tag>
+                            //ex. <span class='fa fa-chevron-right'></span>
+                            a.InnerHtml.AppendHtml(link.Text);
+                        }
+                        else {
+                            // if text should be html encoded
+                            a.InnerHtml.Append(link.Text);
+                        }
+
+                        if (link.Title.Length > 0)
+                        {
+                            a.MergeAttribute("title", link.Title);
+                        }
+
+                        if (AjaxTarget.Length > 0)
+                        {
+                            a.MergeAttribute("data-ajax", "true");
+                            a.MergeAttribute("data-ajax-mode", AjaxMode);
+                            a.MergeAttribute("data-ajax-update", AjaxTarget);
+                            if (AjaxSuccess.Length > 0)
+                            {
+                                a.MergeAttribute("data-ajax-success", AjaxSuccess);
+                            }
+                            if (AjaxFailure.Length > 0)
+                            {
+                                a.MergeAttribute("data-ajax-failure", AjaxFailure);
+                            }
+                            if (AjaxBegin.Length > 0)
+                            {
+                                a.MergeAttribute("data-ajax-begin", AjaxBegin);
+                            }
+                            if (AjaxComplete.Length > 0)
+                            {
+                                a.MergeAttribute("data-ajax-complete", AjaxComplete);
+                            }
+                            if (AjaxLoading.Length > 0)
+                            {
+                                a.MergeAttribute("data-ajax-loading", AjaxLoading);
+                            }
+                            if (AjaxLoadingDuration.Length > 0)
+                            {
+                                a.MergeAttribute("data-ajax-loading-duration", AjaxLoadingDuration);
+                            }
+                        }
+                        li.InnerHtml.AppendHtml(a);
+                    }
+                    else
+                    {
+                        // current or not active
+                        var span = new TagBuilder("span");
+
+                        if (!string.IsNullOrWhiteSpace(LinkCurrentCssClass))
+                        {
+                            span.AddCssClass(LinkCurrentCssClass);
+                        }
+
+                        if (link.Text == "«")
+                        {
+                            span.InnerHtml.AppendHtml("&laquo;");
+
+                        }
+                        else if (link.Text == "»")
+                        {
+                            span.InnerHtml.AppendHtml("&raquo;");
+                        }
+                        else if (link.Text.Contains('<') && link.Text.Contains('>')) 
+                        {
+                            //if text is an html formatted icon and contains a <tag>
+                            //ex. <span class='fa fa-chevron-right'></span>
+                            span.InnerHtml.AppendHtml(link.Text);
+                        }
+                        else {
+                            // if text should be html encoded
+                            span.InnerHtml.Append(link.Text);
+                        }
+
+                        li.InnerHtml.AppendHtml(span);
+                    }
+                             
                 }
-                
-                if (AjaxTarget.Length > 0)
-                {
-                    a.MergeAttribute("data-ajax", "true");
-                    a.MergeAttribute("data-ajax-mode", AjaxMode);
-                    a.MergeAttribute("data-ajax-update", AjaxTarget);
-                }
-                
-                li.InnerHtml.Append(a);
-                
-                output.Content.Append(li);
+       
+                output.Content.AppendHtml(li);
             }
 
             output.Attributes.Clear();
@@ -271,57 +469,39 @@ namespace cloudscribe.Web.Pagination
             
         }
 
-        private string GeneratePageUrl(int pageNumber)
+        private string GeneratePageUrl(long pageNumber)
         {
-            return baseHref + pageNumber.ToString();
-        }
-
-        
-
-        private TagBuilder GenerateLinkTemplate()
-        {
-            // here I'm just letting the framework generate an actionlink
-            // in order to resolve the link url from the routing info
-            // there may be a better way to do this
-            // if I could find the implementation for Generator.GenerateActionLink
-            // maybe I would get a better idea
-
             var routeValues = RouteValues.ToDictionary(
                     kvp => kvp.Key,
                     kvp => (object)kvp.Value,
                     StringComparer.OrdinalIgnoreCase);
 
-            TagBuilder tagBuilder;
-            if (Route == null)
+            if (!routeValues.ContainsKey(PageNumberParam))
             {
-                tagBuilder = Generator.GenerateActionLink(linkText: string.Empty,
-                                                          actionName: Action,
-                                                          controllerName: Controller,
-                                                          protocol: Protocol,
-                                                          hostname: Host,
-                                                          fragment: Fragment,
-                                                          routeValues: routeValues,
-                                                          htmlAttributes: null);
-            }
-            else if (Action != null || Controller != null)
-            {
-                // Route and Action or Controller were specified. Can't determine the href attribute.
-                throw new InvalidOperationException("not enough info to build pager links");
-            }
-            else
-            {
-                tagBuilder = Generator.GenerateRouteLink(linkText: string.Empty,
-                                                         routeName: Route,
-                                                         protocol: Protocol,
-                                                         hostName: Host,
-                                                         fragment: Fragment,
-                                                         routeValues: routeValues,
-                                                         htmlAttributes: null);
+                routeValues.Add(PageNumberParam, pageNumber);
             }
 
-            return tagBuilder;
+            if (Route != null)
+            {
+                return urlHelper.Link(Route, routeValues);
+            }
+            else if (Action != null && Controller != null)
+            {
+                return urlHelper.Action(Action, Controller, routeValues);
+            }
+            else if (BaseHref != null)
+            {
+                if (BaseHref.StartsWith("~/"))
+                {
+                    BaseHref = urlHelper.Content(BaseHref);
+                }
+                var start = "?";
+                if (BaseHref.Contains("?")) start = "&";
+
+                return $"{BaseHref}{start}{routeValues.Select(x => $"{x.Key}={x.Value}").Aggregate((current, next) => $"{current}&{next}")}";
+            }
+
+            return pageNumber.ToString();
         }
-
-
     }
 }

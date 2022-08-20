@@ -1,5 +1,8 @@
-﻿@using PagingDemo.Web.Models
-@model IPagedList<PagingDemo.Web.Models.Product>
+﻿@using cloudscribe.Web.Pagination
+@using PagingDemo.Web.ViewModels
+@using PagingDemo.Web.Models
+
+@model ProductListViewModel
 @{
     ViewBag.Title = "Browse all products with Model";
 }
@@ -17,7 +20,7 @@
         </tr>
     </thead>
     <tbody>
-        @foreach (var product in Model)
+        @foreach (var product in Model.Products.Data)
         {
             <tr>
                 <td>@product.Name</td>
@@ -26,15 +29,36 @@
     </tbody>
 </table>
 <div>
-    <cs-pager cs-paging-pagesize="@Model.PageSize"
-              cs-paging-pagenumber="@Model.PageNumber"
-              cs-paging-totalitems="@Model.TotalItemCount"
-              cs-pagenumber-param="page"
+    <cs-pager cs-paging-pagesize="@Model.Products.PageSize"
+              cs-paging-pagenumber="@Model.Products.PageNumber"
+              cs-paging-totalitems="@Model.Products.TotalItems"
+              cs-pagenumber-param="p"
+              cs-show-first-last="true"
+              cs-suppress-empty-nextprev="true"
+              cs-suppress-inactive-firstlast="true"
+              cs-first-page-text="First"
+              cs-last-page-text="Last"
+              cs-pager-li-current-class="active"
+              cs-pager-li-non-active-class="disabled"
+              asp-route="pagingdemo1"
               asp-controller="Paging"
               asp-action="Index"></cs-pager>
 </div>
 
 @section Scripts {
+
+<script type="text/javascript">
+
+        function PagerRequestSuccess(data) {
+            //console.log("This is the OnSuccessCallback: " + data);
+            console.log("This is the OnSuccessCallback");
+        }
+        function PagerRequestFailure(request, error) {
+            console.log("This is the OnFailure Callback:" + error);
+        }
+
+</script>
+
 
     <environment names="Development">
         <script src="~/lib/jquery-ajax-unobtrusive/jquery.unobtrusive-ajax.js"></script>
